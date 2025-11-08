@@ -1,45 +1,51 @@
+-- Fresh DB
 DROP DATABASE IF EXISTS passwords;
-CREATE DATABASE passwords DEFAULT CHARACTER SET utf8mb4;
+CREATE DATABASE passwords DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 USE passwords;
-
-SET block_encryption_mode = 'aes-256-cbc';
-SET @key_str = UNHEX(SHA2('the dog in the field', 512));
 
 CREATE TABLE IF NOT EXISTS sites (
   site_ID INT UNSIGNED NOT NULL AUTO_INCREMENT,
   url     VARCHAR(512) NOT NULL,
   PRIMARY KEY (site_ID),
-  UNIQUE KEY unique_site_url (url)
-);
+  UNIQUE KEY uq_site_url (url)
+) ENGINE=InnoDB;
+
 
 CREATE TABLE IF NOT EXISTS accounts (
   account_ID INT UNSIGNED NOT NULL AUTO_INCREMENT,
   site_ID    INT UNSIGNED NOT NULL,
   email      VARCHAR(256) NOT NULL,
   username   VARCHAR(256) NOT NULL,
-  PRIMARY KEY (account_ID)
-);
+  PRIMARY KEY (account_ID),
+  UNIQUE KEY uq_site_email_username (site_ID, email, username),
+  KEY ix_accounts_site (site_ID),
+  CONSTRAINT fk_accounts_site
+    FOREIGN KEY (site_ID) REFERENCES sites(site_ID)
+    ON DELETE CASCADE,
+  CONSTRAINT chk_identity_nonempty CHECK (email <> '' OR username <> '')
+) ENGINE=InnoDB;
 
-CREATE TABLE IF NOT EXISTS passwords_data (
-  pass_ID          INT UNSIGNED   NOT NULL AUTO_INCREMENT,
-  account_ID       INT UNSIGNED   NOT NULL,
-  password         VARBINARY(256) NOT NULL,
-  time_of_creation DATE           NOT NULL DEFAULT (CURRENT_DATE),
-  comment          VARCHAR(256)   NULL,
-  is_current       TINYINT(1)     NOT NULL,
-  PRIMARY KEY (pass_ID)
-);
 
-CREATE TABLE password_iv_store (
-  pass_ID   INT UNSIGNED NOT NULL,
-  iv_value  VARBINARY(16) NOT NULL,
+CREATE TABLE IF NOT EXISTS passwords (
+  pass_ID          INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  account_ID       INT UNSIGNED NOT NULL,
+  password_cipher  VARBINARY(512) NOT NULL,
+  iv               BINARY(16) NOT NULL,
+  key_version      TINYINT UNSIGNED NOT NULL DEFAULT 1,
+  time_of_creation DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  comment          VARCHAR(256) NULL,
+  is_current       TINYINT(1) NOT NULL DEFAULT 1,
   PRIMARY KEY (pass_ID),
-  CONSTRAINT fk_iv_pass
-    FOREIGN KEY (pass_ID)
-    REFERENCES passwords_data(pass_ID)
-    ON DELETE CASCADE
-    ON UPDATE CASCADE
-);
+  KEY ix_passwords_account_time (account_ID, time_of_creation),
+  CONSTRAINT fk_passwords_account
+    FOREIGN KEY (account_ID) REFERENCES accounts(account_ID)
+    ON DELETE CASCADE,
+  CONSTRAINT chk_is_current CHECK (is_current IN (0,1))
+) ENGINE=InnoDB;
+
+CREATE UNIQUE INDEX uq_account_current
+  ON passwords ((CASE WHEN is_current = 1 THEN account_ID END));
+
 
 INSERT INTO sites (site_ID, url) VALUES
   (1, 'https://mail.google.com'),
