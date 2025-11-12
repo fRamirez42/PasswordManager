@@ -1,15 +1,17 @@
 -- Fresh DB
-DROP DATABASE IF EXISTS passwords;
-CREATE DATABASE passwords DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
-USE passwords;
+DROP DATABASE IF EXISTS passwords_php;
+CREATE DATABASE passwords_php DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+USE passwords_php;
 
+-- =========================
+-- Tables
+-- =========================
 CREATE TABLE IF NOT EXISTS sites (
   site_ID INT UNSIGNED NOT NULL AUTO_INCREMENT,
   url     VARCHAR(512) NOT NULL,
   PRIMARY KEY (site_ID),
   UNIQUE KEY uq_site_url (url)
 ) ENGINE=InnoDB;
-
 
 CREATE TABLE IF NOT EXISTS accounts (
   account_ID INT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -25,12 +27,11 @@ CREATE TABLE IF NOT EXISTS accounts (
   CONSTRAINT chk_identity_nonempty CHECK (email <> '' OR username <> '')
 ) ENGINE=InnoDB;
 
-
 CREATE TABLE IF NOT EXISTS passwords (
   pass_ID          INT UNSIGNED NOT NULL AUTO_INCREMENT,
   account_ID       INT UNSIGNED NOT NULL,
-  password_cipher  VARBINARY(512) NOT NULL,
-  iv               BINARY(16) NOT NULL,
+  password_cipher  VARBINARY(512) NOT NULL,   -- AES_ENCRYPT(...) goes here
+  iv               BINARY(16) NOT NULL,       -- per-row IV (RANDOM_BYTES(16))
   key_version      TINYINT UNSIGNED NOT NULL DEFAULT 1,
   time_of_creation DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   comment          VARCHAR(256) NULL,
@@ -43,10 +44,13 @@ CREATE TABLE IF NOT EXISTS passwords (
   CONSTRAINT chk_is_current CHECK (is_current IN (0,1))
 ) ENGINE=InnoDB;
 
+-- Enforce only one "current" password per account (MySQL 8.0.13+)
 CREATE UNIQUE INDEX uq_account_current
   ON passwords ((CASE WHEN is_current = 1 THEN account_ID END));
 
-
+-- =========================
+-- Seed data: sites, accounts
+-- =========================
 INSERT INTO sites (site_ID, url) VALUES
   (1, 'https://mail.google.com'),
   (2, 'http://facebook.com'),
@@ -56,76 +60,82 @@ INSERT INTO sites (site_ID, url) VALUES
   (6, 'https://hartford.edu');
 
 INSERT INTO accounts (site_ID, email, username) VALUES
-  (1, 'theshowman@gmail.com', 'theshowman'),
-  (1, 'feliperam1990@gmail.com', 'feliperam'),
-  (2, 'feliperam1990@gmail.com', 'feliper44'),
-  (3, 'felipeprofessional@gmail.com', 'felipe24'),
-  (4, 'pipesuper24@gmail.com', 'NextBigThing99+'),
-  (5, 'feliperam1990@gmail.com', 'WeBall1234'),
-  (5, 'theshowman@gmail.com', 'TheShowManIsHere!'),
-  (6, 'jdoe@hartford.edu', 'jdoe');
+  (1, 'theshowman@gmail.com',        'theshowman'),       -- account_ID = 1
+  (1, 'feliperam1990@gmail.com',     'feliperam'),        -- account_ID = 2
+  (2, 'feliperam1990@gmail.com',     'feliper44'),        -- account_ID = 3
+  (3, 'felipeprofessional@gmail.com','felipe24'),         -- account_ID = 4
+  (4, 'pipesuper24@gmail.com',       'NextBigThing99+'),  -- account_ID = 5
+  (5, 'feliperam1990@gmail.com',     'WeBall1234'),       -- account_ID = 6
+  (5, 'theshowman@gmail.com',        'TheShowManIsHere!'),-- account_ID = 7
+  (6, 'jdoe@hartford.edu',           'jdoe');             -- account_ID = 8
+
+-- =========================
+-- AES session setup
+-- =========================
+SET block_encryption_mode = 'aes-256-cbc';
+-- 32-byte key for AES-256 (load from app/secret manager in real life)
+SET @k = UNHEX(SHA2('the dog in the field', 256));
+
+-- =========================
+-- Password inserts (per-row IVs)
+-- One current (is_current=1) per account (enforced by uq_account_current)
+-- =========================
+-- account 1
+SET @iv = RANDOM_BYTES(16);
+INSERT INTO passwords (account_ID, password_cipher, iv, time_of_creation, comment, is_current)
+VALUES (1, AES_ENCRYPT('HughJackman1234', @k, @iv), @iv, '2025-10-06', NULL, 1);
+
+-- account 2 (history + current)
+SET @iv = RANDOM_BYTES(16);
+INSERT INTO passwords (account_ID, password_cipher, iv, time_of_creation, comment, is_current)
+VALUES (2, AES_ENCRYPT('SuperMario123', @k, @iv), @iv, '2010-06-24', 'Childish, and forgot', 0);
 
 SET @iv = RANDOM_BYTES(16);
-INSERT INTO passwords_data (account_ID, password, time_of_creation, comment, is_current)
-  VALUES (1, AES_ENCRYPT('HughJackman1234', @key_str, @iv), '2025-10-06', NULL, 1);
-INSERT INTO password_iv_store (pass_ID, iv_value) VALUES (LAST_INSERT_ID(), @iv);
+INSERT INTO passwords (account_ID, password_cipher, iv, time_of_creation, comment, is_current)
+VALUES (2, AES_ENCRYPT('ProfessionalPassword26$', @k, @iv), @iv, '2022-02-27', NULL, 1);
+
+-- account 3 (history + current)
+SET @iv = RANDOM_BYTES(16);
+INSERT INTO passwords (account_ID, password_cipher, iv, time_of_creation, comment, is_current)
+VALUES (3, AES_ENCRYPT('GoldenRetriver56!', @k, @iv), @iv, '2012-04-29', 'Got Hacked', 0);
 
 SET @iv = RANDOM_BYTES(16);
-INSERT INTO passwords_data (account_ID, password, time_of_creation, comment, is_current)
-  VALUES (2, AES_ENCRYPT('SuperMario123', @key_str, @iv), '2010-06-24', 'Childish, and forgot', 0);
-INSERT INTO password_iv_store (pass_ID, iv_value) VALUES (LAST_INSERT_ID(), @iv);
+INSERT INTO passwords (account_ID, password_cipher, iv, time_of_creation, comment, is_current)
+VALUES (3, AES_ENCRYPT('ThaWorldo98&', @k, @iv), @iv, '2017-01-31', NULL, 1);
+
+-- account 4 (current)
+SET @iv = RANDOM_BYTES(16);
+INSERT INTO passwords (account_ID, password_cipher, iv, time_of_creation, comment, is_current)
+VALUES (4, AES_ENCRYPT('FelipeRamirez9900*', @k, @iv), @iv, '2018-09-30', NULL, 1);
+
+-- account 5 (two old, one current)
+SET @iv = RANDOM_BYTES(16);
+INSERT INTO passwords (account_ID, password_cipher, iv, time_of_creation, comment, is_current)
+VALUES (5, AES_ENCRYPT('DaBoss67', @k, @iv), @iv, '2014-11-08', 'Forgot it', 0);
 
 SET @iv = RANDOM_BYTES(16);
-INSERT INTO passwords_data (account_ID, password, time_of_creation, comment, is_current)
-  VALUES (2, AES_ENCRYPT('ProfessionalPassword26$', @key_str, @iv), '2022-02-27', NULL, 1);
-INSERT INTO password_iv_store (pass_ID, iv_value) VALUES (LAST_INSERT_ID(), @iv);
+INSERT INTO passwords (account_ID, password_cipher, iv, time_of_creation, comment, is_current)
+VALUES (5, AES_ENCRYPT('RemeberThisTime11#', @k, @iv), @iv, '2017-12-20', 'Forgot it again', 0);
 
 SET @iv = RANDOM_BYTES(16);
-INSERT INTO passwords_data (account_ID, password, time_of_creation, comment, is_current)
-  VALUES (3, AES_ENCRYPT('GoldenRetriver56!', @key_str, @iv), '2012-04-29', 'Got Hacked', 0);
-INSERT INTO password_iv_store (pass_ID, iv_value) VALUES (LAST_INSERT_ID(), @iv);
+INSERT INTO passwords (account_ID, password_cipher, iv, time_of_creation, comment, is_current)
+VALUES (5, AES_ENCRYPT('DogGolden420@', @k, @iv), @iv, '2020-03-15', NULL, 1);
+
+-- account 6 (history + current)
+SET @iv = RANDOM_BYTES(16);
+INSERT INTO passwords (account_ID, password_cipher, iv, time_of_creation, comment, is_current)
+VALUES (6, AES_ENCRYPT('ShowmanshipIsKey12', @k, @iv), @iv, '2014-11-08', 'It is!', 0);
 
 SET @iv = RANDOM_BYTES(16);
-INSERT INTO passwords_data (account_ID, password, time_of_creation, comment, is_current)
-  VALUES (3, AES_ENCRYPT('ThaWorldo98&', @key_str, @iv), '2017-01-31', NULL, 1);
-INSERT INTO password_iv_store (pass_ID, iv_value) VALUES (LAST_INSERT_ID(), @iv);
+INSERT INTO passwords (account_ID, password_cipher, iv, time_of_creation, comment, is_current)
+VALUES (6, AES_ENCRYPT('Dexter8877%', @k, @iv), @iv, '2023-08-20', NULL, 1);
 
+-- account 7 (current)
 SET @iv = RANDOM_BYTES(16);
-INSERT INTO passwords_data (account_ID, password, time_of_creation, comment, is_current)
-  VALUES (4, AES_ENCRYPT('FelipeRamirez9900*', @key_str, @iv), '2018-09-30', NULL, 1);
-INSERT INTO password_iv_store (pass_ID, iv_value) VALUES (LAST_INSERT_ID(), @iv);
+INSERT INTO passwords (account_ID, password_cipher, iv, time_of_creation, comment, is_current)
+VALUES (7, AES_ENCRYPT('IAmHere@', @k, @iv), @iv, '2022-08-20', NULL, 1);
 
+-- account 8 (current)
 SET @iv = RANDOM_BYTES(16);
-INSERT INTO passwords_data (account_ID, password, time_of_creation, comment, is_current)
-  VALUES (5, AES_ENCRYPT('DaBoss67', @key_str, @iv), '2014-11-08', 'Forgot it', 0);
-INSERT INTO password_iv_store (pass_ID, iv_value) VALUES (LAST_INSERT_ID(), @iv);
-
-SET @iv = RANDOM_BYTES(16);
-INSERT INTO passwords_data (account_ID, password, time_of_creation, comment, is_current)
-  VALUES (5, AES_ENCRYPT('RemeberThisTime11#', @key_str, @iv), '2017-12-20', 'Forgot it again', 0);
-INSERT INTO password_iv_store (pass_ID, iv_value) VALUES (LAST_INSERT_ID(), @iv);
-
-SET @iv = RANDOM_BYTES(16);
-INSERT INTO passwords_data (account_ID, password, time_of_creation, comment, is_current)
-  VALUES (5, AES_ENCRYPT('DogGolden420@', @key_str, @iv), '2020-03-15', NULL, 0);
-INSERT INTO password_iv_store (pass_ID, iv_value) VALUES (LAST_INSERT_ID(), @iv);
-
-SET @iv = RANDOM_BYTES(16);
-INSERT INTO passwords_data (account_ID, password, time_of_creation, comment, is_current)
-  VALUES (6, AES_ENCRYPT('ShowmanshipIsKey12', @key_str, @iv), '2014-11-08', 'It is!', 1);
-INSERT INTO password_iv_store (pass_ID, iv_value) VALUES (LAST_INSERT_ID(), @iv);
-
-SET @iv = RANDOM_BYTES(16);
-INSERT INTO passwords_data (account_ID, password, time_of_creation, comment, is_current)
-  VALUES (6, AES_ENCRYPT('Dexter8877%', @key_str, @iv), '2023-08-20', NULL, 1);
-INSERT INTO password_iv_store (pass_ID, iv_value) VALUES (LAST_INSERT_ID(), @iv);
-
-SET @iv = RANDOM_BYTES(16);
-INSERT INTO passwords_data (account_ID, password, time_of_creation, comment, is_current)
-  VALUES (7, AES_ENCRYPT('IAmHere@', @key_str, @iv), '2022-08-20', NULL, 1);
-INSERT INTO password_iv_store (pass_ID, iv_value) VALUES (LAST_INSERT_ID(), @iv);
-
-SET @iv = RANDOM_BYTES(16);
-INSERT INTO passwords_data (account_ID, password, time_of_creation, comment, is_current)
-  VALUES (8, AES_ENCRYPT('SchoolAppropriate78@', @key_str, @iv), '2020-12-31', NULL, 1);
-INSERT INTO password_iv_store (pass_ID, iv_value) VALUES (LAST_INSERT_ID(), @iv);
+INSERT INTO passwords (account_ID, password_cipher, iv, time_of_creation, comment, is_current)
+VALUES (8, AES_ENCRYPT('SchoolAppropriate78@', @k, @iv), @iv, '2020-12-31', NULL, 1);
