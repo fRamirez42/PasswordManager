@@ -1,7 +1,7 @@
 -- Fresh DB
-DROP DATABASE IF EXISTS passwords_php;
-CREATE DATABASE passwords_php DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
-USE passwords_php;
+DROP DATABASE IF EXISTS students_passwords;
+CREATE DATABASE students_passwords DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+USE students_passwords;
 
 -- =========================
 -- Tables
@@ -73,12 +73,11 @@ INSERT INTO accounts (site_ID, email, username) VALUES
 -- AES session setup
 -- =========================
 SET block_encryption_mode = 'aes-256-cbc';
--- 32-byte key for AES-256 (load from app/secret manager in real life)
+-- 32-byte key for AES-256 (in practice, load from your app/secret manager)
 SET @k = UNHEX(SHA2('the dog in the field', 256));
 
 -- =========================
 -- Password inserts (per-row IVs)
--- One current (is_current=1) per account (enforced by uq_account_current)
 -- =========================
 -- account 1
 SET @iv = RANDOM_BYTES(16);
@@ -103,7 +102,7 @@ SET @iv = RANDOM_BYTES(16);
 INSERT INTO passwords (account_ID, password_cipher, iv, time_of_creation, comment, is_current)
 VALUES (3, AES_ENCRYPT('ThaWorldo98&', @k, @iv), @iv, '2017-01-31', NULL, 1);
 
--- account 4 (current)
+-- account 4
 SET @iv = RANDOM_BYTES(16);
 INSERT INTO passwords (account_ID, password_cipher, iv, time_of_creation, comment, is_current)
 VALUES (4, AES_ENCRYPT('FelipeRamirez9900*', @k, @iv), @iv, '2018-09-30', NULL, 1);
@@ -130,12 +129,12 @@ SET @iv = RANDOM_BYTES(16);
 INSERT INTO passwords (account_ID, password_cipher, iv, time_of_creation, comment, is_current)
 VALUES (6, AES_ENCRYPT('Dexter8877%', @k, @iv), @iv, '2023-08-20', NULL, 1);
 
--- account 7 (current)
+-- account 7
 SET @iv = RANDOM_BYTES(16);
 INSERT INTO passwords (account_ID, password_cipher, iv, time_of_creation, comment, is_current)
 VALUES (7, AES_ENCRYPT('IAmHere@', @k, @iv), @iv, '2022-08-20', NULL, 1);
 
--- account 8 (current)
+-- account 8
 SET @iv = RANDOM_BYTES(16);
 INSERT INTO passwords (account_ID, password_cipher, iv, time_of_creation, comment, is_current)
 VALUES (8, AES_ENCRYPT('SchoolAppropriate78@', @k, @iv), @iv, '2020-12-31', NULL, 1);
