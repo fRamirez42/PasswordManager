@@ -64,7 +64,7 @@ $current = get_current_passwords_decrypted();
   <title>Student Passwords</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- stylesheet: keep path relative -->
-  <link rel="stylesheet" href="./css/style.css">
+  <link rel="stylesheet" href="css/style.css?v=3">
 </head>
 <body>
   <div class="container">
