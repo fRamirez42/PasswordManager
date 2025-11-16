@@ -3,9 +3,8 @@ declare(strict_types=1);
 
 const DB_DSN  = 'mysql:host=localhost;dbname=student_passwords;charset=utf8mb4';
 const DB_USER = 'passwords_user';
-const DB_PASS = ''; // assignment requires no password
+const DB_PASS = '';
 
-// Same phrase must be used wherever you AES_ENCRYPT/DECRYPT.
 const AES_PASSPHRASE = 'class-demo-key';
 const AES_MODE       = 'aes-256-cbc';
 
@@ -19,7 +18,6 @@ function db(): PDO {
         PDO::ATTR_EMULATE_PREPARES   => false,
     ]);
 
-    // Set encryption mode per-connection; key is passed as a parameter in queries.
     $pdo->exec("SET block_encryption_mode = '" . AES_MODE . "'");
 
     return $pdo;

@@ -1,49 +1,70 @@
 <?php
-// index.php (project root)
 declare(strict_types=1);
-require_once __DIR__ . '/includes/helpers.php';
+
+define('ADD_SITE', 'ADD_SITE');
+define('ADD_ACCOUNT', 'ADD_ACCOUNT');
+define('ADD_PASSWORD', 'ADD_PASSWORD');
+
+require_once 'includes/helpers.php';
 
 $errors = [];
 $notices = [];
 
-// Handle POST actions
+$option = $_POST['submitted'] ?? null;
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (isset($_POST['clear_results'])) {
+        header('Location: ' . basename($_SERVER['PHP_SELF']));
+        exit;
+    }
+
     try {
-        if (isset($_POST['action']) && $_POST['action'] === 'add_site') {
-            $url = trim($_POST['url'] ?? '');
-            if ($url === '') throw new RuntimeException('URL required.');
-            $id = add_site($url);
-            $notices[] = "Added/loaded site #{$id}.";
-        }
+        switch ($option) {
+            case ADD_SITE:
+                $url = trim($_POST['url'] ?? '');
+                if ($url === '') {
+                    $errors[] = 'URL cannot be empty.';
+                } else {
+                    $id = add_site($url);
+                    $notices[] = "Added/loaded site #{$id}.";
+                }
+                break;
 
-        if (isset($_POST['action']) && $_POST['action'] === 'add_account') {
-            $sid = (int)($_POST['site_ID'] ?? 0);
-            $email = trim($_POST['email'] ?? '');
-            $user  = trim($_POST['username'] ?? '');
-            if ($sid <= 0 || ($email === '' && $user === '')) {
-                throw new RuntimeException('Site and (email or username) required.');
-            }
-            $aid = add_account($sid, $email, $user);
-            $notices[] = "Added account #{$aid}.";
-        }
+            case ADD_ACCOUNT:
+                $sid   = (int)($_POST['site_ID'] ?? 0);
+                $email = trim($_POST['email'] ?? '');
+                $user  = trim($_POST['username'] ?? '');
+                if ($sid <= 0 || ($email === '' && $user === '')) {
+                    $errors[] = 'Site and (email or username) required.';
+                } else {
+                    $aid = add_account($sid, $email, $user);
+                    $notices[] = "Added account #{$aid}.";
+                }
+                break;
 
-        if (isset($_POST['action']) && $_POST['action'] === 'add_password') {
-            $aid = (int)($_POST['account_ID'] ?? 0);
-            $pwd = (string)($_POST['password_plain'] ?? '');
-            $comment = trim($_POST['comment'] ?? '') ?: null;
-            $makeCurrent = isset($_POST['is_current']) && $_POST['is_current'] === '1';
-            if ($aid <= 0 || $pwd === '') {
-                throw new RuntimeException('Account and password required.');
-            }
-            $pid = add_password($aid, $pwd, $comment, $makeCurrent);
-            $notices[] = "Added password entry #{$pid}.";
+            case ADD_PASSWORD:
+                $aid         = (int)($_POST['account_ID'] ?? 0);
+                $pwd         = (string)($_POST['password_plain'] ?? '');
+                $commentRaw  = trim($_POST['comment'] ?? '');
+                $comment     = ($commentRaw === '') ? null : $commentRaw;
+                $makeCurrent = isset($_POST['is_current']) && $_POST['is_current'] === '1';
+
+                if ($aid <= 0 || $pwd === '') {
+                    $errors[] = 'Account and password required.';
+                } else {
+                    $pid = add_password($aid, $pwd, $comment, $makeCurrent);
+                    $notices[] = "Added password entry #{$pid}.";
+                }
+                break;
+
+            default:
+                break;
         }
     } catch (Throwable $e) {
         $errors[] = $e->getMessage();
     }
 }
 
-// Data for forms/tables
 $sites    = get_sites();
 $accounts = [];
 if (!empty($sites)) {
@@ -57,58 +78,62 @@ if (!empty($sites)) {
 }
 $current = get_current_passwords_decrypted();
 ?>
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>Student Passwords</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <!-- stylesheet: keep path relative -->
-  <link rel="stylesheet" href="css/style.css?v=3">
-</head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h1>Student Passwords</h1>
-      <small class="muted">AES-256 (per-row IV) • normalized schema</small>
-    </div>
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Passwords</title>
+    <link rel="stylesheet" href="css/style.css?v=4">
+  </head>
+  <body>
+    <header class="header">
+      <h1>Passwords</h1>
+      <p class="muted">Student Passwords — AES-256 (per-row IV) • normalized schema</p>
+    </header>
+
+    <form id="clear-results" method="post" action="<?php echo htmlspecialchars(basename($_SERVER['PHP_SELF'])); ?>">
+      <input type="hidden" name="clear_results" value="1">
+      <input id="clear-results__submit-button" class="btn" type="submit" value="Clear Results">
+    </form>
 
     <div class="msgs">
       <?php foreach ($notices as $m): ?>
-        <div class="msg ok"><?= htmlspecialchars($m) ?></div>
+        <div class="msg ok"><?php echo htmlspecialchars($m); ?></div>
       <?php endforeach; ?>
       <?php foreach ($errors as $m): ?>
-        <div class="msg err"><?= htmlspecialchars($m) ?></div>
+        <div class="msg err"><?php echo htmlspecialchars($m); ?></div>
       <?php endforeach; ?>
     </div>
 
-    <div class="card">
+    <section class="card">
       <h2>Add Site</h2>
-      <form method="post" class="grid grid-3">
-        <input type="hidden" name="action" value="add_site">
+      <form method="post" class="grid grid-3" action="<?php echo htmlspecialchars(basename($_SERVER['PHP_SELF'])); ?>">
+        <input type="hidden" name="submitted" value="<?php echo ADD_SITE; ?>">
         <div>
           <label for="url">URL</label>
           <input id="url" name="url" type="url" placeholder="https://example.com" required>
         </div>
         <div></div>
         <div style="align-self:end;justify-self:end;">
-          <button class="btn btn-primary" type="submit">Add / Load</button>
+          <input class="btn btn-primary" type="submit" value="Add / Load">
         </div>
         <span class="muted">Duplicate URLs are ignored by the unique key.</span>
       </form>
-    </div>
+    </section>
 
-    <div class="card">
+    <section class="card">
       <h2>Add Account</h2>
-      <form method="post" class="grid grid-3">
-        <input type="hidden" name="action" value="add_account">
+      <form method="post" class="grid grid-3" action="<?php echo htmlspecialchars(basename($_SERVER['PHP_SELF'])); ?>">
+        <input type="hidden" name="submitted" value="<?php echo ADD_ACCOUNT; ?>">
 
         <div>
           <label for="site_ID">Site</label>
           <select id="site_ID" name="site_ID" required>
             <option value="">Choose…</option>
             <?php foreach ($sites as $s): ?>
-              <option value="<?= (int)$s['site_ID'] ?>"><?= htmlspecialchars($s['url']) ?></option>
+              <option value="<?php echo (int)$s['site_ID']; ?>">
+                <?php echo htmlspecialchars($s['url']); ?>
+              </option>
             <?php endforeach; ?>
           </select>
         </div>
@@ -124,24 +149,27 @@ $current = get_current_passwords_decrypted();
         </div>
 
         <div style="grid-column: 1 / -1; display:flex; gap:10px; justify-content:flex-end;">
-          <button class="btn btn-secondary" type="submit">Add Account</button>
+          <input class="btn btn-secondary" type="submit" value="Add Account">
         </div>
         <span class="muted">DB blocks duplicate (site, email, username) and requires at least one of email/username.</span>
       </form>
-    </div>
+    </section>
 
-    <div class="card">
+    <section class="card">
       <h2>Add Password</h2>
-      <form method="post" class="grid grid-3">
-        <input type="hidden" name="action" value="add_password">
+      <form method="post" class="grid grid-3" action="<?php echo htmlspecialchars(basename($_SERVER['PHP_SELF'])); ?>">
+        <input type="hidden" name="submitted" value="<?php echo ADD_PASSWORD; ?>">
 
         <div>
           <label for="account_ID">Account</label>
           <select id="account_ID" name="account_ID" required>
             <option value="">Choose…</option>
             <?php foreach ($accounts as $a): ?>
-              <option value="<?= (int)$a['account_ID'] ?>">
-                <?= htmlspecialchars($a['url']) ?> — <?= htmlspecialchars($a['email'] ?: $a['username']) ?>
+              <option value="<?php echo (int)$a['account_ID']; ?>">
+                <?php
+                  $label = $a['email'] !== '' ? $a['email'] : $a['username'];
+                  echo htmlspecialchars($a['url'] . ' — ' . $label);
+                ?>
               </option>
             <?php endforeach; ?>
           </select>
@@ -163,14 +191,14 @@ $current = get_current_passwords_decrypted();
         </label>
 
         <div style="justify-self:end;">
-          <button class="btn btn-success" type="submit">Add Password</button>
+          <input class="btn btn-success" type="submit" value="Add Password">
         </div>
 
         <span class="muted">Encrypted via AES_ENCRYPT with a per-row IV (handled in helpers.php).</span>
       </form>
-    </div>
+    </section>
 
-    <div class="card table-wrap">
+    <section class="card table-wrap">
       <h2>Current Passwords</h2>
       <table>
         <thead>
@@ -189,18 +217,17 @@ $current = get_current_passwords_decrypted();
           <?php else: ?>
             <?php foreach ($current as $r): ?>
               <tr>
-                <td><?= htmlspecialchars($r['url']) ?></td>
-                <td><?= htmlspecialchars($r['email']) ?></td>
-                <td><?= htmlspecialchars($r['username']) ?></td>
-                <td><?= htmlspecialchars($r['password_plain']) ?></td>
-                <td><?= htmlspecialchars($r['time_of_creation']) ?></td>
-                <td><?= htmlspecialchars($r['comment'] ?? '') ?></td>
+                <td><?php echo htmlspecialchars($r['url']); ?></td>
+                <td><?php echo htmlspecialchars($r['email']); ?></td>
+                <td><?php echo htmlspecialchars($r['username']); ?></td>
+                <td><?php echo htmlspecialchars($r['password_plain']); ?></td>
+                <td><?php echo htmlspecialchars($r['time_of_creation']); ?></td>
+                <td><?php echo htmlspecialchars($r['comment'] ?? ''); ?></td>
               </tr>
             <?php endforeach; ?>
           <?php endif; ?>
         </tbody>
       </table>
-    </div>
-  </div>
-</body>
+    </section>
+  </body>
 </html>

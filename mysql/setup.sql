@@ -1,7 +1,3 @@
--- Run from the mysql/ folder:
---   mysql -u root -p < setup.sql
--- Creates DB, user (no password), tables, and constraints.
-
 DROP DATABASE IF EXISTS student_passwords;
 CREATE DATABASE student_passwords DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 
@@ -49,6 +45,6 @@ CREATE TABLE IF NOT EXISTS passwords (
   CONSTRAINT chk_is_current CHECK (is_current IN (0,1))
 ) ENGINE=InnoDB;
 
--- Ensures only one "current" password per account (MySQL 8.0.13+).
+-- Ensures only one "current" password per account
 CREATE UNIQUE INDEX uq_account_current
   ON passwords ((CASE WHEN is_current = 1 THEN account_ID END));
