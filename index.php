@@ -4,7 +4,7 @@ declare(strict_types=1);
 define('ADD_SITE',       'ADD_SITE');
 define('ADD_ACCOUNT',    'ADD_ACCOUNT');
 define('ADD_PASSWORD',   'ADD_PASSWORD');
-define('UPDATE_PATTERN', 'UPDATE_PATTERN'); // sites/accounts only
+define('UPDATE_PATTERN', 'UPDATE_PATTERN');
 define('DELETE_PATTERN', 'DELETE_PATTERN');
 define('SEARCH',         'SEARCH');
 
@@ -17,6 +17,7 @@ $notices = [];
 $search_rows = [];
 $option = $_POST['submitted'] ?? null;
 
+/* Handle actions */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['clear_results'])) {
         header('Location: ' . basename($_SERVER['PHP_SELF']));
@@ -43,9 +44,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $sid   = (int)($_POST['site_ID'] ?? 0);
                 $email = trim($_POST['email'] ?? '');
                 $user  = trim($_POST['username'] ?? '');
-                if ($sid <= 0 || ($email === '' && $user === '')) {
-                    $errors[] = 'Site and (email or username) required.'; break;
-                }
+                if ($sid <= 0 || ($email === '' && $user === '')) { $errors[] = 'Site and (email or username) required.'; break; }
                 $aid = add_account($sid, $email, $user);
                 $notices[] = "Added account #{$aid}.";
                 break;
@@ -134,7 +133,6 @@ $current = get_current_passwords_decrypted();
       <?php foreach ($errors as $m): ?><div class="msg err"><?php echo h($m); ?></div><?php endforeach; ?>
     </div>
 
-    <!-- Search -->
     <section class="card">
       <h2>Search</h2>
       <form method="post" action="<?php echo h(basename($_SERVER['PHP_SELF'])); ?>">
@@ -167,7 +165,6 @@ $current = get_current_passwords_decrypted();
       <?php endif; ?>
     </section>
 
-    <!-- Add Site + Sites table -->
     <section class="card">
       <h2>Add Site</h2>
       <form method="post" class="grid grid-3" action="<?php echo h(basename($_SERVER['PHP_SELF'])); ?>">
@@ -197,7 +194,6 @@ $current = get_current_passwords_decrypted();
       </div>
     </section>
 
-    <!-- Add Account + Accounts table -->
     <section class="card">
       <h2>Add Account</h2>
       <form method="post" class="grid grid-3" action="<?php echo h(basename($_SERVER['PHP_SELF'])); ?>">
@@ -251,7 +247,6 @@ $current = get_current_passwords_decrypted();
       </div>
     </section>
 
-    <!-- Add Password -->
     <section class="card">
       <h2>Add Password</h2>
       <form method="post" class="grid grid-3" action="<?php echo h(basename($_SERVER['PHP_SELF'])); ?>">
@@ -291,7 +286,6 @@ $current = get_current_passwords_decrypted();
       </form>
     </section>
 
-    <!-- Current Passwords -->
     <section class="card table-wrap">
       <h2>Current Passwords</h2>
       <table>
@@ -324,7 +318,6 @@ $current = get_current_passwords_decrypted();
       </table>
     </section>
 
-    <!-- Update by Pattern -->
     <section class="card">
       <h2>Update by Pattern</h2>
       <form method="post" action="<?php echo h(basename($_SERVER['PHP_SELF'])); ?>" class="grid grid-3">
@@ -372,71 +365,64 @@ $current = get_current_passwords_decrypted();
           <button class="btn" type="submit">Update by Pattern</button>
         </div>
 
-        <span class="muted">For sites, fill the top three (pattern + new URL). For accounts, use the middle rows (patterns) and provide new email/username.</span>
+        <span class="muted">For sites, use the URL fields. For accounts, use the email/username fields.</span>
       </form>
     </section>
 
-    <!-- Delete by Pattern -->
-<section class="card">
-  <h2>Delete by Pattern</h2>
-  <form method="post" action="<?php echo h(basename($_SERVER['PHP_SELF'])); ?>" class="grid grid-3" id="delete-form">
-    <input type="hidden" name="submitted" value="<?php echo DELETE_PATTERN; ?>">
+    <section class="card">
+      <h2>Delete by Pattern</h2>
+      <form method="post" action="<?php echo h(basename($_SERVER['PHP_SELF'])); ?>" class="grid grid-3" id="delete-form">
+        <input type="hidden" name="submitted" value="<?php echo DELETE_PATTERN; ?>">
 
-    <div>
-      <label for="table">Table</label>
-      <select id="table" name="table" required>
-        <option value="sites">sites</option>
-        <option value="accounts">accounts</option>
-        <option value="passwords">passwords</option>
-      </select>
-    </div>
+        <div>
+          <label for="table">Table</label>
+          <select id="table" name="table" required>
+            <option value="sites">sites</option>
+            <option value="accounts">accounts</option>
+            <option value="passwords">passwords</option>
+          </select>
+        </div>
 
-    <div>
-      <label for="field">Field</label>
-      <select id="field" name="field" required>
-        <!-- will be populated by JS based on table -->
-      </select>
-    </div>
+        <div>
+          <label for="field">Field</label>
+          <select id="field" name="field" required></select>
+        </div>
 
-    <div>
-      <label for="pattern">Pattern</label>
-      <input id="pattern" name="pattern" type="text" placeholder="example.com or @gmail.com" required>
-    </div>
+        <div>
+          <label for="pattern">Pattern</label>
+          <input id="pattern" name="pattern" type="text" placeholder="example.com or @gmail.com" required>
+        </div>
 
-    <div style="grid-column:1/-1;display:flex;justify-content:flex-end;">
-      <button class="btn" type="submit">Delete by Pattern</button>
-    </div>
+        <div style="grid-column:1/-1;display:flex;justify-content:flex-end;">
+          <button class="btn" type="submit">Delete by Pattern</button>
+        </div>
 
-    <span class="muted">Valid combos: sites.url • accounts.email • accounts.username • passwords.comment</span>
-  </form>
+        <span class="muted">sites.url • accounts.email • accounts.username • passwords.comment</span>
+      </form>
 
-  <script>
-    (function () {
-      const tableSel = document.getElementById('table');
-      const fieldSel = document.getElementById('field');
-
-      const optionsByTable = {
-        sites:     [{v:'url',       t:'url'}],
-        accounts:  [{v:'email',     t:'email'}, {v:'username', t:'username'}],
-        passwords: [{v:'comment',   t:'comment'}],
-      };
-
-      function refreshFields() {
-        const t = tableSel.value;
-        const opts = optionsByTable[t] || [];
-        fieldSel.innerHTML = '';
-        for (const o of opts) {
-          const el = document.createElement('option');
-          el.value = o.v; el.textContent = o.t;
-          fieldSel.appendChild(el);
-        }
-      }
-
-      tableSel.addEventListener('change', refreshFields);
-      refreshFields(); // initial population
-    })();
-  </script>
-</section>
-
+      <script>
+        (function () {
+          const tableSel = document.getElementById('table');
+          const fieldSel = document.getElementById('field');
+          const optionsByTable = {
+            sites:     [{v:'url', t:'url'}],
+            accounts:  [{v:'email', t:'email'}, {v:'username', t:'username'}],
+            passwords: [{v:'comment', t:'comment'}],
+          };
+          function refreshFields() {
+            const t = tableSel.value;
+            const opts = optionsByTable[t] || [];
+            fieldSel.innerHTML = '';
+            for (const o of opts) {
+              const el = document.createElement('option');
+              el.value = o.v; el.textContent = o.t;
+              fieldSel.appendChild(el);
+            }
+          }
+          tableSel.addEventListener('change', refreshFields);
+          refreshFields();
+        })();
+      </script>
+    </section>
   </body>
 </html>

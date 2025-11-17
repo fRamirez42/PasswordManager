@@ -3,14 +3,14 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/config.php';
 
-/* -------------------- Sites -------------------- */
-
+/* Sites */
 function get_sites(): array {
     $sql = "SELECT site_ID, url FROM sites ORDER BY url";
     return db()->query($sql)->fetchAll();
 }
 
 function add_site(string $url): int {
+    // Upsert by unique URL so duplicates return the existing id
     $sql = "INSERT INTO sites (url)
             VALUES (:url)
             ON DUPLICATE KEY UPDATE site_ID = LAST_INSERT_ID(site_ID)";
@@ -19,7 +19,6 @@ function add_site(string $url): int {
     return (int)db()->lastInsertId();
 }
 
-/** Update sites.url WHERE url LIKE '%pattern%' */
 function update_site_url_by_pattern(string $pattern, string $newUrl): int {
     if ($pattern === '' || $newUrl === '') return 0;
     $st = db()->prepare("UPDATE sites SET url = :u WHERE url LIKE :p");
@@ -27,8 +26,7 @@ function update_site_url_by_pattern(string $pattern, string $newUrl): int {
     return $st->rowCount();
 }
 
-/* -------------------- Accounts -------------------- */
-
+/* Accounts */
 function add_account(int $siteId, string $email, string $username): int {
     $sql = "INSERT INTO accounts (site_ID, email, username)
             VALUES (:sid, :email, :username)";
@@ -37,7 +35,6 @@ function add_account(int $siteId, string $email, string $username): int {
     return (int)db()->lastInsertId();
 }
 
-/** Update accounts (email/username) using LIKE filters on email/username */
 function update_account_by_pattern(?string $emailPat, ?string $userPat, ?string $newEmail, ?string $newUser): int {
     $conds = []; $params = [];
     if ($emailPat !== null && $emailPat !== '') { $conds[] = "email LIKE :ep"; $params[':ep'] = '%'.$emailPat.'%'; }
@@ -55,8 +52,7 @@ function update_account_by_pattern(?string $emailPat, ?string $userPat, ?string 
     return $st->rowCount();
 }
 
-/* -------------------- Passwords (AES per-row IV) -------------------- */
-
+/* Passwords (AES with per-row IV) */
 function add_password(int $accountId, string $plaintext, ?string $comment = null, bool $makeCurrent = true): int {
     $pdo = db();
     $iv  = random_bytes(16);
@@ -111,11 +107,9 @@ function get_current_passwords_decrypted(): array {
     return $st->fetchAll();
 }
 
-/* -------------------- Search (LIKE + decrypted) -------------------- */
-
+/* Search across url/email/username/comment/password */
 function search_all(string $q): array {
     $like = '%'.$q.'%';
-
     $sql = "SELECT
               s.url,
               a.email,
@@ -132,22 +126,16 @@ function search_all(string $q): array {
                OR p.comment LIKE :q4
                OR CAST(AES_DECRYPT(p.password_cipher, UNHEX(SHA2(:k2,256)), p.iv) AS CHAR) LIKE :q5
             ORDER BY p.time_of_creation DESC";
-
     $st = db()->prepare($sql);
     $st->execute([
         ':k1' => AES_PASSPHRASE,
         ':k2' => AES_PASSPHRASE,
-        ':q1' => $like,
-        ':q2' => $like,
-        ':q3' => $like,
-        ':q4' => $like,
-        ':q5' => $like,
+        ':q1' => $like, ':q2' => $like, ':q3' => $like, ':q4' => $like, ':q5' => $like,
     ]);
     return $st->fetchAll();
 }
 
-/* -------------------- Delete by Pattern (allowlist) -------------------- */
-
+/* Delete */
 function delete_by_pattern(string $table, string $field, string $pattern): int {
     $allow = [
         'sites'     => ['url'],
@@ -158,7 +146,6 @@ function delete_by_pattern(string $table, string $field, string $pattern): int {
         throw new RuntimeException('Invalid table for delete.');
     }
     if (!in_array($field, $allow[$table], true)) {
-        // make it obvious why 0 rows were affected
         throw new RuntimeException("Invalid field '{$field}' for table '{$table}'.");
     }
     $pattern = trim($pattern);
