@@ -1,8 +1,9 @@
 <?php
 declare(strict_types=1);
+
 require_once __DIR__ . '/config.php';
 
-/* ---------- Sites ---------- */
+/* -------------------- Sites -------------------- */
 
 function get_sites(): array {
     $sql = "SELECT site_ID, url FROM sites ORDER BY url";
@@ -10,28 +11,55 @@ function get_sites(): array {
 }
 
 function add_site(string $url): int {
-    $sql = "INSERT INTO sites (url) VALUES (:url)
+    $sql = "INSERT INTO sites (url)
+            VALUES (:url)
             ON DUPLICATE KEY UPDATE site_ID = LAST_INSERT_ID(site_ID)";
-    $stmt = db()->prepare($sql);
-    $stmt->execute([':url' => $url]);
+    $st = db()->prepare($sql);
+    $st->execute([':url' => $url]);
     return (int)db()->lastInsertId();
 }
 
-/* ---------- Accounts ---------- */
+/** Update sites.url WHERE url LIKE '%pattern%' */
+function update_site_url_by_pattern(string $pattern, string $newUrl): int {
+    if ($pattern === '' || $newUrl === '') return 0;
+    $st = db()->prepare("UPDATE sites SET url = :u WHERE url LIKE :p");
+    $st->execute([':u' => $newUrl, ':p' => '%'.$pattern.'%']);
+    return $st->rowCount();
+}
+
+/* -------------------- Accounts -------------------- */
 
 function add_account(int $siteId, string $email, string $username): int {
     $sql = "INSERT INTO accounts (site_ID, email, username)
             VALUES (:sid, :email, :username)";
-    $stmt = db()->prepare($sql);
-    $stmt->execute([':sid'=>$siteId, ':email'=>$email, ':username'=>$username]);
+    $st = db()->prepare($sql);
+    $st->execute([':sid' => $siteId, ':email' => $email, ':username' => $username]);
     return (int)db()->lastInsertId();
 }
 
-/* ---------- Passwords (AES, per-row IV) ---------- */
+/** Update accounts (email/username) using LIKE filters on email/username */
+function update_account_by_pattern(?string $emailPat, ?string $userPat, ?string $newEmail, ?string $newUser): int {
+    $conds = []; $params = [];
+    if ($emailPat !== null && $emailPat !== '') { $conds[] = "email LIKE :ep"; $params[':ep'] = '%'.$emailPat.'%'; }
+    if ($userPat  !== null && $userPat  !== '')  { $conds[] = "username LIKE :up"; $params[':up'] = '%'.$userPat.'%'; }
+    if (!$conds) return 0;
+
+    $sets = [];
+    if ($newEmail !== null && $newEmail !== '') { $sets[] = "email = :ne"; $params[':ne'] = $newEmail; }
+    if ($newUser  !== null && $newUser  !== '') { $sets[] = "username = :nu"; $params[':nu'] = $newUser; }
+    if (!$sets) return 0;
+
+    $sql = "UPDATE accounts SET ".implode(', ', $sets)." WHERE ".implode(' AND ', $conds);
+    $st = db()->prepare($sql);
+    $st->execute($params);
+    return $st->rowCount();
+}
+
+/* -------------------- Passwords (AES per-row IV) -------------------- */
 
 function add_password(int $accountId, string $plaintext, ?string $comment = null, bool $makeCurrent = true): int {
-    $iv  = random_bytes(16); // unique per row
     $pdo = db();
+    $iv  = random_bytes(16);
     $pdo->beginTransaction();
     try {
         if ($makeCurrent) {
@@ -39,25 +67,21 @@ function add_password(int $accountId, string $plaintext, ?string $comment = null
                 ->execute([':aid' => $accountId]);
         }
 
-        // Use distinct placeholders for the IV to avoid HY093 with native prepares
         $sql = "INSERT INTO passwords (account_ID, password_cipher, iv, comment, is_current)
-                VALUES (
-                  :aid,
-                  AES_ENCRYPT(:pwd, UNHEX(SHA2(:key, 256)), :iv_enc),
-                  :iv_store,
-                  :comment,
-                  :current
-                )";
-
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute([
+                VALUES (:aid,
+                        AES_ENCRYPT(:pwd, UNHEX(SHA2(:k,256)), :iv_enc),
+                        :iv_store,
+                        :comment,
+                        :cur)";
+        $st = $pdo->prepare($sql);
+        $st->execute([
             ':aid'      => $accountId,
             ':pwd'      => $plaintext,
-            ':key'      => AES_PASSPHRASE,
+            ':k'        => AES_PASSPHRASE,
             ':iv_enc'   => $iv,
             ':iv_store' => $iv,
             ':comment'  => $comment,
-            ':current'  => $makeCurrent ? 1 : 0,
+            ':cur'      => $makeCurrent ? 1 : 0,
         ]);
 
         $pdo->commit();
@@ -69,117 +93,81 @@ function add_password(int $accountId, string $plaintext, ?string $comment = null
 }
 
 function get_current_passwords_decrypted(): array {
-    $sql = "
-      SELECT s.url, a.email, a.username,
-             CAST(AES_DECRYPT(p.password_cipher, UNHEX(SHA2(:key, 256)), p.iv) AS CHAR) AS password_plain,
-             p.time_of_creation, p.comment
-      FROM passwords p
-      JOIN accounts a ON p.account_ID = a.account_ID
-      JOIN sites    s ON a.site_ID    = s.site_ID
-      WHERE p.is_current = 1
-      ORDER BY s.url, a.email";
-    $stmt = db()->prepare($sql);
-    $stmt->execute([':key' => AES_PASSPHRASE]);
-    return $stmt->fetchAll();
+    $sql = "SELECT
+              p.pass_ID,
+              s.url,
+              a.email,
+              a.username,
+              CAST(AES_DECRYPT(p.password_cipher, UNHEX(SHA2(:k,256)), p.iv) AS CHAR) AS password_plain,
+              p.time_of_creation,
+              p.comment
+            FROM passwords p
+            JOIN accounts a ON a.account_ID = p.account_ID
+            JOIN sites    s ON s.site_ID    = a.site_ID
+            WHERE p.is_current = 1
+            ORDER BY s.url, a.email, a.username, p.time_of_creation DESC";
+    $st = db()->prepare($sql);
+    $st->execute([':k' => AES_PASSPHRASE]);
+    return $st->fetchAll();
 }
-function allowed_fields(): array {
-    return [
-        'sites' => ['name','url'],
-        'accounts' => ['email','username'],
-        'passwords' => ['comment'] // we do not update cipher directly here
-    ];
-}
+
+/* -------------------- Search (LIKE + decrypted) -------------------- */
 
 function search_all(string $q): array {
-    $pdo = db();
-    $sql = "
-      SELECT s.name AS site_name, s.url, a.email, a.username,
-             CAST(AES_DECRYPT(p.password_cipher, UNHEX(SHA2(:k,512)), p.iv) AS CHAR) AS password_plain,
-             p.time_of_creation, p.comment
-      FROM passwords p
-      JOIN accounts a ON a.account_ID = p.account_ID
-      JOIN sites s    ON s.site_ID = a.site_ID
-      WHERE s.name LIKE :qq OR s.url LIKE :qq
-         OR a.email LIKE :qq OR a.username LIKE :qq
-         OR p.comment LIKE :qq
-         OR CAST(AES_DECRYPT(p.password_cipher, UNHEX(SHA2(:k2,512)), p.iv) AS CHAR) LIKE :qq
-      ORDER BY p.time_of_creation DESC
-    ";
-    $stmt = $pdo->prepare($sql);
     $like = '%'.$q.'%';
-    $stmt->execute([':k'=>AES_PASSPHRASE, ':k2'=>AES_PASSPHRASE, ':qq'=>$like]);
-    return $stmt->fetchAll();
+
+    $sql = "SELECT
+              s.url,
+              a.email,
+              a.username,
+              CAST(AES_DECRYPT(p.password_cipher, UNHEX(SHA2(:k1,256)), p.iv) AS CHAR) AS password_plain,
+              p.time_of_creation,
+              p.comment
+            FROM passwords p
+            JOIN accounts a ON a.account_ID = p.account_ID
+            JOIN sites    s ON s.site_ID    = a.site_ID
+            WHERE s.url LIKE :q1
+               OR a.email LIKE :q2
+               OR a.username LIKE :q3
+               OR p.comment LIKE :q4
+               OR CAST(AES_DECRYPT(p.password_cipher, UNHEX(SHA2(:k2,256)), p.iv) AS CHAR) LIKE :q5
+            ORDER BY p.time_of_creation DESC";
+
+    $st = db()->prepare($sql);
+    $st->execute([
+        ':k1' => AES_PASSPHRASE,
+        ':k2' => AES_PASSPHRASE,
+        ':q1' => $like,
+        ':q2' => $like,
+        ':q3' => $like,
+        ':q4' => $like,
+        ':q5' => $like,
+    ]);
+    return $st->fetchAll();
 }
 
-function update_by_pattern(string $targetTable, string $targetField, string $newValue,
-                           string $whereTable, string $whereField, string $pattern): int {
-    $allowed = allowed_fields();
-    if (!isset($allowed[$targetTable]) || !in_array($targetField, $allowed[$targetTable], true)) {
-        throw new RuntimeException('Invalid target column.');
-    }
-    if (!isset($allowed[$whereTable]) || !in_array($whereField, $allowed[$whereTable], true)) {
-        throw new RuntimeException('Invalid WHERE column.');
-    }
-
-    $joins = "
-      FROM sites s
-      JOIN accounts a ON a.site_ID = s.site_ID
-      JOIN passwords p ON p.account_ID = a.account_ID
-    ";
-
-    $map = ['sites'=>'s','accounts'=>'a','passwords'=>'p'];
-    $tAlias = $map[$targetTable];
-    $wAlias = $map[$whereTable];
-
-    $sql = "UPDATE {$targetTable} {$tAlias}
-            {$joins}
-            SET {$tAlias}.{$targetField} = :newv
-            WHERE {$wAlias}.{$whereField} LIKE :pat";
-    $pdo = db();
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute([':newv'=>$newValue, ':pat'=>'%'.$pattern.'%']);
-    return $stmt->rowCount();
-}
+/* -------------------- Delete by Pattern (allowlist) -------------------- */
 
 function delete_by_pattern(string $table, string $field, string $pattern): int {
-    $allowed = allowed_fields();
-    if (!isset($allowed[$table]) || !in_array($field, $allowed[$table], true)) {
-        throw new RuntimeException('Invalid delete column.');
+    $allow = [
+        'sites'     => ['url'],
+        'accounts'  => ['email','username'],
+        'passwords' => ['comment'],
+    ];
+    if (!isset($allow[$table])) {
+        throw new RuntimeException('Invalid table for delete.');
     }
-    // Cascade rules will clean dependent rows if you target parent rows
-    $pdo = db();
-    $stmt = $pdo->prepare("DELETE FROM {$table} WHERE {$field} LIKE :pat");
-    $stmt->execute([':pat'=>'%'.$pattern.'%']);
-    return $stmt->rowCount();
-}
-
-function insert_full_entry(string $siteName, string $url, string $email, string $username,
-                           string $passwordPlain, ?string $comment): int {
-    $pdo = db();
-    $pdo->beginTransaction();
-    try {
-        // upsert site by unique(name) / unique(url)
-        $sid = add_site_named($siteName, $url); // helper just like add_site() but with name
-        $aid = add_account($sid, $email, $username);
-        $pid = add_password($aid, $passwordPlain, $comment, true);
-        $pdo->commit();
-        return $pid;
-    } catch (Throwable $e) {
-        $pdo->rollBack();
-        throw $e;
+    if (!in_array($field, $allow[$table], true)) {
+        // make it obvious why 0 rows were affected
+        throw new RuntimeException("Invalid field '{$field}' for table '{$table}'.");
     }
-}
+    $pattern = trim($pattern);
+    if ($pattern === '') {
+        throw new RuntimeException('Pattern cannot be empty.');
+    }
 
-function add_site_named(string $name, string $url): int {
-    $pdo = db();
-    // try existing by name first
-    $id = $pdo->prepare("SELECT site_ID FROM sites WHERE name = :n");
-    $id->execute([':n'=>$name]);
-    $sid = $id->fetchColumn();
-    if ($sid) return (int)$sid;
-
-    $stmt = $pdo->prepare("INSERT INTO sites (name, url) VALUES (:n, :u)
-                           ON DUPLICATE KEY UPDATE url = VALUES(url)");
-    $stmt->execute([':n'=>$name, ':u'=>$url]);
-    return (int)$pdo->lastInsertId();
+    $sql = "DELETE FROM {$table} WHERE {$field} LIKE :p";
+    $st  = db()->prepare($sql);
+    $st->execute([':p' => '%'.$pattern.'%']);
+    return $st->rowCount();
 }

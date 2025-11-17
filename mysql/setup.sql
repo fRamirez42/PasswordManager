@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS passwords (
   pass_ID          INT UNSIGNED NOT NULL AUTO_INCREMENT,
   account_ID       INT UNSIGNED NOT NULL,
   password_cipher  VARBINARY(512) NOT NULL,   -- ciphertext from AES_ENCRYPT(...)
-  iv               BINARY(16) NOT NULL,       -- per-row IV; never reuse across rows
+  iv               BINARY(16) NOT NULL,
   key_version      TINYINT UNSIGNED NOT NULL DEFAULT 1,
   time_of_creation DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   comment          VARCHAR(256) NULL,
