@@ -4,16 +4,11 @@ declare(strict_types=1);
 define('ADD_SITE', 'ADD_SITE');
 define('ADD_ACCOUNT', 'ADD_ACCOUNT');
 define('ADD_PASSWORD', 'ADD_PASSWORD');
-define('SEARCH_ALL', 'SEARCH_ALL');
-define('UPDATE_BY_PATTERN', 'UPDATE_BY_PATTERN');
-define('INSERT_FULL', 'INSERT_FULL');
-define('DELETE_BY_PATTERN', 'DELETE_BY_PATTERN');
 
 require_once 'includes/helpers.php';
 
 $errors = [];
 $notices = [];
-$search_results = [];
 
 $option = $_POST['submitted'] ?? null;
 
@@ -25,57 +20,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     try {
         switch ($option) {
-            case INSERT_FULL:
-                $sn  = trim($_POST['site_name'] ?? '');
+            case ADD_SITE:
                 $url = trim($_POST['url'] ?? '');
-                $em  = trim($_POST['email'] ?? '');
-                $un  = trim($_POST['username'] ?? '');
-                $pw  = (string)($_POST['password_plain'] ?? '');
-                $cm  = trim($_POST['comment'] ?? '') ?: null;
-                if ($sn === '' || $url === '' || $pw === '' || ($em === '' && $un === '')) {
-                    $errors[] = 'Site name, URL, password, and one of email/username are required.';
+                if ($url === '') {
+                    $errors[] = 'URL cannot be empty.';
                 } else {
-                    $pid = insert_full_entry($sn, $url, $em, $un, $pw, $cm);
-                    $notices[] = "Inserted entry; password row #{$pid}.";
+                    $id = add_site($url);
+                    $notices[] = "Added/loaded site #{$id}.";
                 }
                 break;
 
-            case SEARCH_ALL:
-                $q = trim($_POST['q'] ?? '');
-                if ($q === '') {
-                    $errors[] = 'Search query empty.';
+            case ADD_ACCOUNT:
+                $sid   = (int)($_POST['site_ID'] ?? 0);
+                $email = trim($_POST['email'] ?? '');
+                $user  = trim($_POST['username'] ?? '');
+                if ($sid <= 0 || ($email === '' && $user === '')) {
+                    $errors[] = 'Site and (email or username) required.';
                 } else {
-                    $search_results = search_all($q);
-                    if (!$search_results) {
-                        $errors[] = 'Nothing found.';
-                    } else {
-                        $notices[] = 'Search completed.';
-                    }
+                    $aid = add_account($sid, $email, $user);
+                    $notices[] = "Added account #{$aid}.";
                 }
                 break;
 
-            case UPDATE_BY_PATTERN:
-                [$tTable,$tField] = explode('.', $_POST['target'] ?? '');
-                [$wTable,$wField] = explode('.', $_POST['where'] ?? '');
-                $new = trim($_POST['new_value'] ?? '');
-                $pat = trim($_POST['pattern'] ?? '');
-                if (!$tTable || !$tField || !$wTable || !$wField || $new === '' || $pat === '') {
-                    $errors[] = 'All update fields are required.';
+            case ADD_PASSWORD:
+                $aid         = (int)($_POST['account_ID'] ?? 0);
+                $pwd         = (string)($_POST['password_plain'] ?? '');
+                $commentRaw  = trim($_POST['comment'] ?? '');
+                $comment     = ($commentRaw === '') ? null : $commentRaw;
+                $makeCurrent = isset($_POST['is_current']) && $_POST['is_current'] === '1';
+
+                if ($aid <= 0 || $pwd === '') {
+                    $errors[] = 'Account and password required.';
                 } else {
-                    $n = update_by_pattern($tTable, $tField, $new, $wTable, $wField, $pat);
-                    $notices[] = "Updated {$n} row(s).";
+                    $pid = add_password($aid, $pwd, $comment, $makeCurrent);
+                    $notices[] = "Added password entry #{$pid}.";
                 }
                 break;
 
-            case DELETE_BY_PATTERN:
-                [$dTable,$dField] = explode('.', $_POST['del'] ?? '');
-                $pat = trim($_POST['pattern'] ?? '');
-                if (!$dTable || !$dField || $pat === '') {
-                    $errors[] = 'Delete table/field and pattern are required.';
-                } else {
-                    $n = delete_by_pattern($dTable, $dField, $pat);
-                    $notices[] = "Deleted {$n} row(s).";
-                }
+            default:
                 break;
         }
     } catch (Throwable $e) {
@@ -101,7 +83,6 @@ $current = get_current_passwords_decrypted();
   <head>
     <meta charset="utf-8">
     <title>Passwords</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="stylesheet" href="css/style.css?v=4">
   </head>
   <body>
@@ -124,149 +105,99 @@ $current = get_current_passwords_decrypted();
       <?php endforeach; ?>
     </div>
 
-    <!-- Insert Entry (one step) -->
     <section class="card">
-      <h2>Insert Entry</h2>
+      <h2>Add Site</h2>
       <form method="post" class="grid grid-3" action="<?php echo htmlspecialchars(basename($_SERVER['PHP_SELF'])); ?>">
-        <input type="hidden" name="submitted" value="<?php echo INSERT_FULL; ?>">
+        <input type="hidden" name="submitted" value="<?php echo ADD_SITE; ?>">
         <div>
-          <label>Site/App Name</label>
-          <input type="text" name="site_name" required>
+          <label for="url">URL</label>
+          <input id="url" name="url" type="url" placeholder="https://example.com" required>
         </div>
-        <div>
-          <label>URL</label>
-          <input type="url" name="url" required placeholder="https://example.com">
+        <div></div>
+        <div style="align-self:end;justify-self:end;">
+          <input class="btn btn-primary" type="submit" value="Add / Load">
         </div>
-        <div>
-          <label>Email</label>
-          <input type="email" name="email">
-        </div>
-        <div>
-          <label>Username</label>
-          <input type="text" name="username">
-        </div>
-        <div>
-          <label>Password</label>
-          <input type="text" name="password_plain" required>
-        </div>
-        <div style="grid-column: 1 / -1;">
-          <label>Comment</label>
-          <textarea name="comment" rows="3" placeholder="note…"></textarea>
-        </div>
-        <div style="grid-column: 1 / -1; text-align:right;">
-          <input class="btn btn-success" type="submit" value="Insert">
-        </div>
+        <span class="muted">Duplicate URLs are ignored by the unique key.</span>
       </form>
     </section>
 
-    <!-- Search -->
     <section class="card">
-      <h2>Search</h2>
-      <form method="post" action="<?php echo htmlspecialchars(basename($_SERVER['PHP_SELF'])); ?>">
-        <input type="hidden" name="submitted" value="<?php echo SEARCH_ALL; ?>">
-        <label for="q">Query</label>
-        <input id="q" name="q" type="text" placeholder="email, username, site name, url, comment, or password">
-        <input class="btn" type="submit" value="Search">
-      </form>
-    </section>
-
-    <?php if (!empty($search_results)): ?>
-    <section class="card table-wrap">
-      <h2>Search Results</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>Site</th>
-            <th>URL</th>
-            <th>Email</th>
-            <th>Username</th>
-            <th>Password</th>
-            <th>Created</th>
-            <th>Comment</th>
-          </tr>
-        </thead>
-        <tbody>
-          <?php foreach ($search_results as $r): ?>
-            <tr>
-              <td><?php echo htmlspecialchars($r['site_name']); ?></td>
-              <td><?php echo htmlspecialchars($r['url']); ?></td>
-              <td><?php echo htmlspecialchars($r['email']); ?></td>
-              <td><?php echo htmlspecialchars($r['username']); ?></td>
-              <td><?php echo htmlspecialchars($r['password_plain']); ?></td>
-              <td><?php echo htmlspecialchars($r['time_of_creation']); ?></td>
-              <td><?php echo htmlspecialchars($r['comment'] ?? ''); ?></td>
-            </tr>
-          <?php endforeach; ?>
-        </tbody>
-      </table>
-    </section>
-    <?php endif; ?>
-
-    <!-- Update -->
-    <section class="card">
-      <h2>Update (by pattern)</h2>
+      <h2>Add Account</h2>
       <form method="post" class="grid grid-3" action="<?php echo htmlspecialchars(basename($_SERVER['PHP_SELF'])); ?>">
-        <input type="hidden" name="submitted" value="<?php echo UPDATE_BY_PATTERN; ?>">
+        <input type="hidden" name="submitted" value="<?php echo ADD_ACCOUNT; ?>">
+
         <div>
-          <label>Target Table/Field</label>
-          <select name="target">
-            <option value="sites.name">sites.name</option>
-            <option value="sites.url">sites.url</option>
-            <option value="accounts.email">accounts.email</option>
-            <option value="accounts.username">accounts.username</option>
-            <option value="passwords.comment">passwords.comment</option>
+          <label for="site_ID">Site</label>
+          <select id="site_ID" name="site_ID" required>
+            <option value="">Choose…</option>
+            <?php foreach ($sites as $s): ?>
+              <option value="<?php echo (int)$s['site_ID']; ?>">
+                <?php echo htmlspecialchars($s['url']); ?>
+              </option>
+            <?php endforeach; ?>
           </select>
         </div>
+
         <div>
-          <label>New Value</label>
-          <input type="text" name="new_value" required>
+          <label for="email">Email</label>
+          <input id="email" name="email" type="email" placeholder="you@example.com">
         </div>
+
         <div>
-          <label>WHERE Table/Field</label>
-          <select name="where">
-            <option value="sites.name">sites.name</option>
-            <option value="sites.url">sites.url</option>
-            <option value="accounts.email">accounts.email</option>
-            <option value="accounts.username">accounts.username</option>
-            <option value="passwords.comment">passwords.comment</option>
-          </select>
+          <label for="username">Username</label>
+          <input id="username" name="username" type="text" placeholder="username">
         </div>
-        <div>
-          <label>Pattern (LIKE)</label>
-          <input type="text" name="pattern" placeholder="e.g., example.com" required>
+
+        <div style="grid-column: 1 / -1; display:flex; gap:10px; justify-content:flex-end;">
+          <input class="btn btn-secondary" type="submit" value="Add Account">
         </div>
-        <div style="grid-column: 1 / -1; text-align:right;">
-          <input class="btn" type="submit" value="Update">
-        </div>
+        <span class="muted">DB blocks duplicate (site, email, username) and requires at least one of email/username.</span>
       </form>
     </section>
 
-    <!-- Delete -->
     <section class="card">
-      <h2>Delete (by pattern)</h2>
+      <h2>Add Password</h2>
       <form method="post" class="grid grid-3" action="<?php echo htmlspecialchars(basename($_SERVER['PHP_SELF'])); ?>">
-        <input type="hidden" name="submitted" value="<?php echo DELETE_BY_PATTERN; ?>">
+        <input type="hidden" name="submitted" value="<?php echo ADD_PASSWORD; ?>">
+
         <div>
-          <label>Table/Field</label>
-          <select name="del" required>
-            <option value="sites.name">sites.name</option>
-            <option value="sites.url">sites.url</option>
-            <option value="accounts.email">accounts.email</option>
-            <option value="accounts.username">accounts.username</option>
-            <option value="passwords.comment">passwords.comment</option>
+          <label for="account_ID">Account</label>
+          <select id="account_ID" name="account_ID" required>
+            <option value="">Choose…</option>
+            <?php foreach ($accounts as $a): ?>
+              <option value="<?php echo (int)$a['account_ID']; ?>">
+                <?php
+                  $label = $a['email'] !== '' ? $a['email'] : $a['username'];
+                  echo htmlspecialchars($a['url'] . ' — ' . $label);
+                ?>
+              </option>
+            <?php endforeach; ?>
           </select>
         </div>
+
         <div>
-          <label>Pattern (LIKE)</label>
-          <input type="text" name="pattern" placeholder="e.g., @oldmail.com" required>
+          <label for="password_plain">Password (plaintext)</label>
+          <input id="password_plain" name="password_plain" type="text" required>
         </div>
-        <div style="grid-column: 1 / -1; text-align:right;">
-          <input class="btn" type="submit" value="Delete">
+
+        <div>
+          <label for="comment">Comment (optional)</label>
+          <input id="comment" name="comment" type="text" placeholder="note…">
         </div>
+
+        <label class="checkbox" style="grid-column: 1 / 3; align-self:center;">
+          <input type="checkbox" name="is_current" value="1" checked>
+          Make current (older current will be turned off)
+        </label>
+
+        <div style="justify-self:end;">
+          <input class="btn btn-success" type="submit" value="Add Password">
+        </div>
+
+        <span class="muted">Encrypted via AES_ENCRYPT with a per-row IV (handled in helpers.php).</span>
       </form>
     </section>
 
-    <!-- Current Passwords -->
     <section class="card table-wrap">
       <h2>Current Passwords</h2>
       <table>
