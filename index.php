@@ -115,7 +115,7 @@ $current = get_current_passwords_decrypted();
   <head>
     <meta charset="utf-8">
     <title>Passwords</title>
-    <link rel="stylesheet" href="css/style.css?v=10">
+    <link rel="stylesheet" href="css/style.css">
   </head>
   <body>
     <header class="header">
